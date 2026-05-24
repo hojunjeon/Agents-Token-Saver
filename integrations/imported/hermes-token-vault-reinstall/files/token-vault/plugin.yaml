@@ -1,0 +1,8 @@
+name: token-vault
+version: "0.1.0"
+description: Store large tool results out-of-context and return compact, loss-aware summaries with retrieval handles.
+author: Hermes Agent
+hooks:
+  - transform_tool_result
+provides_hooks:
+  - transform_tool_result

@@ -1,0 +1,10 @@
+node_modules/
+npm-debug.log*
+.DS_Store
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.bak*
+/artifacts/
+/token-vault/
+.omx/
