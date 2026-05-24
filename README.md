@@ -1,6 +1,6 @@
 # Agents Token Saver
 
-Token-saving adapters for agentic coding tools. The main implementation in this repository is a Windows/Codex Desktop `PostToolUse` Token Vault hook that keeps model performance intact by preserving exact tool output outside the model context while sending a compact, high-signal summary back to the agent.
+Token-saving adapters for agentic coding tools. The main implementation in this repository is a Windows/Codex Desktop Token Vault hook suite that keeps model performance intact by preserving exact tool output outside the model context while sending a compact, high-signal summary back to the agent. It also includes a lightweight `/상태` status hook so Desktop sessions can still show 5-hour and weekly token quota data.
 
 This repository also includes three imported reinstall packages for related hosts:
 
@@ -21,6 +21,7 @@ Agents Token Saver uses a loss-aware pattern inspired by RTK-style output filter
 3. Store the exact original payload locally.
 4. Return a compact JSON summary with status, errors, head/tail lines, high-signal lines, byte counts, reduction percentage, and a retrieval path.
 5. Bypass compaction when the agent intentionally reads vault artifacts.
+6. Handle `/상태` and `/status` through `UserPromptSubmit` without touching tool-output compaction.
 
 Small outputs are left untouched.
 
@@ -30,9 +31,11 @@ The Codex Desktop hook lives in:
 
 - `src/token-vault-core.mjs`
 - `src/codex-token-vault-hook.mjs`
+- `src/codex-status-core.mjs`
+- `src/codex-status-hook.mjs`
 - `scripts/install-token-vault.ps1`
 
-It is designed for Windows Codex Desktop and keeps existing OMX hooks intact. Installation inserts the vault hook before the existing OMX `PostToolUse` hook, then records Codex hook trust hashes for both entries.
+It is designed for Windows Codex Desktop and keeps existing OMX hooks intact. Installation inserts the vault hook before the existing OMX `PostToolUse` hook, inserts the status hook before the existing OMX `UserPromptSubmit` hook, then records Codex hook trust hashes for all managed entries.
 
 ### Behavior
 
@@ -43,6 +46,17 @@ It is designed for Windows Codex Desktop and keeps existing OMX hooks intact. In
 - SQLite index when `node:sqlite` is available, JSONL fallback otherwise
 - Redacts common secret-shaped fields in summaries: authorization, token, secret, password, API key, cookie, signature, private key
 - Fail-open hook design: hook errors are logged and original tool behavior continues
+
+### Desktop Status Command
+
+The installer adds `codex-status-windows-shim.ps1` as the first `UserPromptSubmit` hook. It reacts only to:
+
+```text
+/상태
+/status
+```
+
+The hook reads the newest local `token_count` event from `%USERPROFILE%\.codex\sessions\**\*.jsonl`, then injects concise status context into the turn. Token Vault remains isolated on `PostToolUse`, so quota display and output compaction do not compete with each other.
 
 ### Install
 
@@ -70,10 +84,11 @@ $env:CODEX_TOKEN_VAULT_DIR = "$HOME\.omx\token-vault-codex"
 
 ### Uninstall
 
-Remove the Token Vault `PostToolUse` entry from `%USERPROFILE%\.codex\hooks.json`, then delete:
+Remove the Token Vault `PostToolUse` entry and status `UserPromptSubmit` entry from `%USERPROFILE%\.codex\hooks.json`, then delete:
 
 ```powershell
 Remove-Item -Recurse -Force "$HOME\.codex\hooks\codex-token-vault-windows-shim.ps1"
+Remove-Item -Recurse -Force "$HOME\.codex\hooks\codex-status-windows-shim.ps1"
 Remove-Item -Recurse -Force "$HOME\.omx\token-vault-codex"
 ```
 
@@ -150,8 +165,8 @@ npm run benchmark
 
 | Scenario | Without Token Vault | With Token Vault | Reduction | Hook Time |
 | --- | ---: | ---: | ---: | ---: |
-| Large test log with failures | 241,022 bytes | 4,200 bytes | 98.3% | 29.56 ms |
-| Repo-wide search output | 167,219 bytes | 5,942 bytes | 96.4% | 12.52 ms |
+| Large test log with failures | 241,022 bytes | 4,200 bytes | 98.3% | 24.87 ms |
+| Repo-wide search output | 167,219 bytes | 5,942 bytes | 96.4% | 13.36 ms |
 | Small command output | 17 bytes | 17 bytes | 0% | 0.06 ms |
 
 The compactor leaves small outputs untouched and only rewrites results when the compact wrapper is meaningfully smaller than the original.
@@ -167,9 +182,10 @@ node --check .\src\token-vault-core.mjs
 
 Current validation status:
 
-- `npm test`: 5/5 passing
+- `npm test`: 10/10 passing
 - `npm run benchmark`: 96.4-98.3% reduction on large synthetic outputs
-- Installed Windows shim: emits compact Codex `PostToolUse` replacement output without warnings
+- Installed Windows vault shim: emits compact Codex `PostToolUse` replacement output without warnings
+- Installed Windows status shim: emits `UserPromptSubmit` status context for `/상태`, `/status`, and the Windows mojibake fallback `/??`
 
 ## Security Notes
 
