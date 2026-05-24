@@ -10,18 +10,23 @@ $HookScript = Join-Path $VaultBin 'codex-token-vault-hook.mjs'
 $CoreScript = Join-Path $VaultBin 'token-vault-core.mjs'
 $StatusHookScript = Join-Path $VaultBin 'codex-status-hook.mjs'
 $StatusCoreScript = Join-Path $VaultBin 'codex-status-core.mjs'
+$StatusCliScript = Join-Path $VaultBin 'codex-status-cli.mjs'
 $ShimScript = Join-Path $CodexHooksDir 'codex-token-vault-windows-shim.ps1'
 $StatusShimScript = Join-Path $CodexHooksDir 'codex-status-windows-shim.ps1'
+$StatusSkillDir = Join-Path $CodexHome 'skills\codex-token-status'
+$StatusSkillFile = Join-Path $StatusSkillDir 'SKILL.md'
 $HooksJson = Join-Path $CodexHome 'hooks.json'
 $NodePath = (Get-Command node).Source
 $Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
-New-Item -ItemType Directory -Force -Path $VaultBin, (Join-Path $VaultRoot 'artifacts'), $CodexHooksDir | Out-Null
+New-Item -ItemType Directory -Force -Path $VaultBin, (Join-Path $VaultRoot 'artifacts'), $CodexHooksDir, $StatusSkillDir | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $WorkspaceRoot 'src\codex-token-vault-hook.mjs') -Destination $HookScript -Force
 Copy-Item -LiteralPath (Join-Path $WorkspaceRoot 'src\token-vault-core.mjs') -Destination $CoreScript -Force
 Copy-Item -LiteralPath (Join-Path $WorkspaceRoot 'src\codex-status-hook.mjs') -Destination $StatusHookScript -Force
 Copy-Item -LiteralPath (Join-Path $WorkspaceRoot 'src\codex-status-core.mjs') -Destination $StatusCoreScript -Force
+Copy-Item -LiteralPath (Join-Path $WorkspaceRoot 'src\codex-status-cli.mjs') -Destination $StatusCliScript -Force
+Copy-Item -LiteralPath (Join-Path $WorkspaceRoot 'skills\codex-token-status\SKILL.md') -Destination $StatusSkillFile -Force
 
 @"
 `$ErrorActionPreference = 'Stop'
@@ -210,9 +215,12 @@ if (Test-Path -LiteralPath $ConfigToml) {
 
 node --check $HookScript | Out-Null
 node --check $StatusHookScript | Out-Null
+node --check $StatusCliScript | Out-Null
 Write-Output "Installed Codex Token Vault hook:"
 Write-Output "  hook: $HookScript"
 Write-Output "  status hook: $StatusHookScript"
+Write-Output "  status cli: $StatusCliScript"
+Write-Output "  status skill: $StatusSkillFile"
 Write-Output "  shim: $ShimScript"
 Write-Output "  status shim: $StatusShimScript"
 Write-Output "  vault: $VaultRoot"

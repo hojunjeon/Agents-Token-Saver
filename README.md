@@ -1,6 +1,6 @@
 # Agents Token Saver
 
-Token-saving adapters for agentic coding tools. The main implementation in this repository is a Windows/Codex Desktop Token Vault hook suite that keeps model performance intact by preserving exact tool output outside the model context while sending a compact, high-signal summary back to the agent. It also includes a lightweight `/상태` status hook so Desktop sessions can still show 5-hour and weekly token quota data.
+Token-saving adapters for agentic coding tools. The main implementation in this repository is a Windows/Codex Desktop Token Vault hook suite that keeps model performance intact by preserving exact tool output outside the model context while sending a compact, high-signal summary back to the agent. It also includes a `/상태` fallback hook, status CLI, and Codex skill so Desktop sessions can still surface 5-hour and weekly token quota data.
 
 This repository also includes three imported reinstall packages for related hosts:
 
@@ -21,7 +21,7 @@ Agents Token Saver uses a loss-aware pattern inspired by RTK-style output filter
 3. Store the exact original payload locally.
 4. Return a compact JSON summary with status, errors, head/tail lines, high-signal lines, byte counts, reduction percentage, and a retrieval path.
 5. Bypass compaction when the agent intentionally reads vault artifacts.
-6. Handle `/상태` and `/status` through `UserPromptSubmit` without touching tool-output compaction.
+6. Preserve Codex's native `/status` path and add `/상태` fallback surfaces without touching tool-output compaction.
 
 Small outputs are left untouched.
 
@@ -33,6 +33,8 @@ The Codex Desktop hook lives in:
 - `src/codex-token-vault-hook.mjs`
 - `src/codex-status-core.mjs`
 - `src/codex-status-hook.mjs`
+- `src/codex-status-cli.mjs`
+- `skills/codex-token-status/SKILL.md`
 - `scripts/install-token-vault.ps1`
 
 It is designed for Windows Codex Desktop and keeps existing OMX hooks intact. Installation inserts the vault hook before the existing OMX `PostToolUse` hook, inserts the status hook before the existing OMX `UserPromptSubmit` hook, then records Codex hook trust hashes for all managed entries.
@@ -49,14 +51,27 @@ It is designed for Windows Codex Desktop and keeps existing OMX hooks intact. In
 
 ### Desktop Status Command
 
-The installer adds `codex-status-windows-shim.ps1` as the first `UserPromptSubmit` hook. It reacts only to:
+Codex's own Desktop `/status` command is a built-in app slash command that shows thread ID, context usage, and rate limits. Built-in slash commands are handled by Codex before ordinary `UserPromptSubmit` hooks, so Token Vault does not intercept or replace the native `/status` command.
+
+For Korean Desktop sessions, the installer adds two fallback surfaces for `/상태`:
+
+1. `codex-status-windows-shim.ps1` as the first `UserPromptSubmit` hook.
+2. A user skill installed at `%USERPROFILE%\.codex\skills\codex-token-status\SKILL.md` with `name: "상태"`.
+
+The fallback hook reacts only to:
 
 ```text
 /상태
 /status
 ```
 
-The hook reads the newest local `token_count` event from `%USERPROFILE%\.codex\sessions\**\*.jsonl`, then injects concise status context into the turn. Token Vault remains isolated on `PostToolUse`, so quota display and output compaction do not compete with each other.
+Both fallback paths read the newest local `token_count` event from `%USERPROFILE%\.codex\sessions\**\*.jsonl`. Token Vault remains isolated on `PostToolUse`, so quota display and output compaction do not compete with each other.
+
+Direct check:
+
+```powershell
+node "$HOME\.omx\token-vault-codex\bin\codex-status-cli.mjs"
+```
 
 ### Install
 
@@ -165,9 +180,9 @@ npm run benchmark
 
 | Scenario | Without Token Vault | With Token Vault | Reduction | Hook Time |
 | --- | ---: | ---: | ---: | ---: |
-| Large test log with failures | 241,022 bytes | 4,200 bytes | 98.3% | 24.87 ms |
-| Repo-wide search output | 167,219 bytes | 5,942 bytes | 96.4% | 13.36 ms |
-| Small command output | 17 bytes | 17 bytes | 0% | 0.06 ms |
+| Large test log with failures | 241,022 bytes | 4,200 bytes | 98.3% | 20.63 ms |
+| Repo-wide search output | 167,219 bytes | 5,942 bytes | 96.4% | 9.18 ms |
+| Small command output | 17 bytes | 17 bytes | 0% | 0.04 ms |
 
 The compactor leaves small outputs untouched and only rewrites results when the compact wrapper is meaningfully smaller than the original.
 
@@ -182,10 +197,12 @@ node --check .\src\token-vault-core.mjs
 
 Current validation status:
 
-- `npm test`: 10/10 passing
+- `npm test`: 11/11 passing
 - `npm run benchmark`: 96.4-98.3% reduction on large synthetic outputs
 - Installed Windows vault shim: emits compact Codex `PostToolUse` replacement output without warnings
 - Installed Windows status shim: emits `UserPromptSubmit` status context for `/상태`, `/status`, and the Windows mojibake fallback `/??`
+- Installed status CLI: prints current local 5-hour and weekly quota lines directly
+- Installed status skill: exposes a `상태` skill for Desktop slash/skill routing
 
 ## Security Notes
 
