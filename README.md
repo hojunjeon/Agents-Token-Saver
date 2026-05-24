@@ -1,81 +1,84 @@
 # Agents Token Saver
 
-Token-saving adapters for agentic coding tools. The main implementation in this repository is a Windows/Codex Desktop Token Vault hook suite that keeps model performance intact by preserving exact tool output outside the model context while sending a compact, high-signal summary back to the agent. It also includes a `/상태` fallback hook, status CLI, and Codex skill so Desktop sessions can still surface 5-hour and weekly token quota data.
+에이전트 코딩 환경에서 큰 터미널 출력, 테스트 로그, 검색 결과가 컨텍스트를 잡아먹는 문제를 줄이기 위한 토큰 절약 도구 모음입니다.
 
-This repository also includes three imported reinstall packages for related hosts:
+이 저장소의 주 기능은 **Windows Codex Desktop용 Token Vault hook**입니다. 도구 실행 결과 원문은 로컬 파일로 보존하고, 모델 컨텍스트에는 오류, 요약, 앞/뒤 일부, 원문 경로만 넣어 토큰 사용량을 크게 줄입니다. 작은 출력은 건드리지 않습니다.
 
-- `integrations/imported/openclaw-tokenjuice-vault-reinstall` - OpenClaw TokenJuice vault patch
-- `integrations/imported/hermes-token-vault-reinstall` - Hermes `token-vault` plugin
-- `integrations/imported/omx-token-vault-reinstall` - Original OMX/Codex token-vault hook package
+첨부된 3개 재설치 패키지도 함께 보존되어 있습니다.
 
-The original `.tar.gz` bundles are preserved in `archives/`.
+- `integrations/imported/openclaw-tokenjuice-vault-reinstall`: OpenClaw TokenJuice vault 패치
+- `integrations/imported/hermes-token-vault-reinstall`: Hermes `token-vault` 플러그인
+- `integrations/imported/omx-token-vault-reinstall`: 기존 OMX/Codex token-vault hook 패키지
 
-## Why This Exists
+원본 `.tar.gz` 파일은 `archives/`에 들어 있습니다.
 
-Most agent token waste comes from large tool results, not final prose. Logs, test output, repository-wide search, and generated JSON can flood the context window even when the agent only needs status, errors, head/tail lines, and a way to retrieve the exact original output.
+## 왜 필요한가
 
-Agents Token Saver uses a loss-aware pattern inspired by RTK-style output filtering, Context Mode-style external storage, and token optimizer MCP patterns:
+에이전트가 토큰을 많이 쓰는 지점은 보통 최종 답변이 아니라 **도구 출력**입니다. 예를 들어:
 
-1. Let tools run normally.
-2. Detect large `PostToolUse` results.
-3. Store the exact original payload locally.
-4. Return a compact JSON summary with status, errors, head/tail lines, high-signal lines, byte counts, reduction percentage, and a retrieval path.
-5. Bypass compaction when the agent intentionally reads vault artifacts.
-6. Preserve Codex's native `/status` path and add `/상태` fallback surfaces without touching tool-output compaction.
+- 실패한 테스트 로그
+- `rg` 같은 repo-wide 검색 결과
+- 긴 빌드 로그
+- 큰 JSON 출력
+- 반복적인 터미널 출력
 
-Small outputs are left untouched.
+모델은 전체 원문이 아니라 “어디가 실패했는지, 앞/뒤 맥락이 무엇인지, 원문을 다시 볼 수 있는 위치가 어디인지”만 필요한 경우가 많습니다.
 
-## Main Feature: Windows Codex Desktop Token Vault
+Agents Token Saver는 이 흐름으로 동작합니다.
 
-The Codex Desktop hook lives in:
+1. 도구는 평소처럼 실행됩니다.
+2. `PostToolUse` hook이 큰 출력만 감지합니다.
+3. 원본 출력 전체를 로컬 vault에 저장합니다.
+4. 모델에는 압축 요약과 원문 파일 경로만 전달합니다.
+5. 모델이 vault artifact를 직접 읽는 경우에는 재압축하지 않습니다.
+6. 작은 출력은 원문 그대로 둡니다.
+
+## 핵심 기능
+
+### Windows Codex Desktop Token Vault
+
+관련 파일:
 
 - `src/token-vault-core.mjs`
 - `src/codex-token-vault-hook.mjs`
-- `src/codex-status-core.mjs`
-- `src/codex-status-hook.mjs`
-- `src/codex-status-cli.mjs`
-- `skills/codex-token-status/SKILL.md`
 - `scripts/install-token-vault.ps1`
+- `tools/benchmark.mjs`
 
-It is designed for Windows Codex Desktop and keeps existing OMX hooks intact. Installation inserts the vault hook before the existing OMX `PostToolUse` hook, inserts the status hook before the existing OMX `UserPromptSubmit` hook, then records Codex hook trust hashes for all managed entries.
+기본 동작:
 
-### Behavior
+- 기본 압축 기준: `12,000` bytes 이상
+- 기본 요약 길이: `4,000` chars
+- vault 위치: `%USERPROFILE%\.omx\token-vault-codex`
+- 원문 artifact 위치: `%USERPROFILE%\.omx\token-vault-codex\artifacts\<id>.json`
+- `node:sqlite` 사용 가능 시 SQLite 인덱스 사용, 아니면 JSONL fallback
+- summary에서 흔한 secret 형태 필드 redaction
+  - authorization
+  - token
+  - secret
+  - password
+  - API key
+  - cookie
+  - signature
+  - private key
+- hook 오류가 나도 Codex 실행은 막지 않는 fail-open 설계
 
-- Default threshold: `12,000` bytes
-- Default summary budget: `4,000` chars
-- Storage root: `%USERPROFILE%\.omx\token-vault-codex`
-- Exact artifact storage: `%USERPROFILE%\.omx\token-vault-codex\artifacts\<id>.json`
-- SQLite index when `node:sqlite` is available, JSONL fallback otherwise
-- Redacts common secret-shaped fields in summaries: authorization, token, secret, password, API key, cookie, signature, private key
-- Fail-open hook design: hook errors are logged and original tool behavior continues
+## Codex Desktop `/status` / `/상태` 주의사항
 
-### Desktop Status Command
+Codex Desktop의 공식 `/status`는 앱 내장 slash command입니다. 이 명령은 일반 프롬프트나 `UserPromptSubmit` hook보다 먼저 처리됩니다.
 
-Codex's own Desktop `/status` command is a built-in app slash command that shows thread ID, context usage, and rate limits. Built-in slash commands are handled by Codex before ordinary `UserPromptSubmit` hooks, so Token Vault does not intercept or replace the native `/status` command.
+따라서 Token Vault의 핵심 기능인 `PostToolUse` 압축 hook은 `/status` 또는 `/상태` 입력을 직접 막는 구조가 아닙니다.
 
-For Korean Desktop sessions, the installer adds two fallback surfaces for status prompts:
+중요한 구분:
 
-1. `codex-status-windows-shim.ps1` as the first `UserPromptSubmit` hook.
-2. A user skill installed at `%USERPROFILE%\.codex\skills\codex-token-status\SKILL.md` with `name: "token-status"`.
+- `PostToolUse` Token Vault hook: 도구 실행 결과가 나온 뒤 큰 출력을 압축합니다.
+- `/status`: Codex Desktop/CLI의 내장 slash command입니다.
+- `/상태`: Codex/OMX 설정에 따라 별도 alias처럼 동작할 수 있지만, Codex Desktop이 사용자 정의 slash command를 안정적으로 등록해 주는 공개 API는 확인되지 않았습니다.
 
-The fallback hook reacts only if the prompt reaches `UserPromptSubmit` as:
+이 저장소는 **토큰 절약 기능 저장소**입니다. 로컬 Desktop의 `/상태` alias 문제는 Codex/OMX 로컬 설정 문제일 수 있으며, Token Vault 자체와 분리해서 봐야 합니다.
 
-```text
-/상태
-/status
-```
+## 설치
 
-Codex app built-in slash commands are handled before hooks, and custom skills are mentioned with `$`/`@` rather than `/`. If the Desktop slash parser does not pass `/상태` through, use `token-status`, `$token-status`, or a plain Korean prompt such as `상태` instead. Both fallback paths read the newest local `token_count` event from `%USERPROFILE%\.codex\sessions\**\*.jsonl`. Token Vault remains isolated on `PostToolUse`, so quota display and output compaction do not compete with each other.
-
-Direct check:
-
-```powershell
-node "$HOME\.omx\token-vault-codex\bin\codex-status-cli.mjs"
-```
-
-### Install
-
-From a PowerShell terminal:
+PowerShell에서 실행합니다.
 
 ```powershell
 git clone https://github.com/hojunjeon/Agents-Token-Saver.git
@@ -84,109 +87,64 @@ npm test
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-token-vault.ps1
 ```
 
-Restart Codex Desktop or start a new Codex session after installing so the hook config is reloaded.
+설치 후 Codex Desktop 또는 Codex 세션을 새로 시작해야 hook 설정이 반영됩니다.
 
-### Configure
+설치 스크립트가 하는 일:
 
-Environment variables:
+- `src/codex-token-vault-hook.mjs`와 core 파일을 `%USERPROFILE%\.omx\token-vault-codex\bin`으로 복사
+- `%USERPROFILE%\.codex\hooks\codex-token-vault-windows-shim.ps1` 생성
+- `%USERPROFILE%\.codex\hooks.json`의 `PostToolUse` 앞쪽에 Token Vault hook 추가
+- 기존 OMX hook은 유지
+- `hooks.json`, `config.toml` 백업 생성
+
+## 설정
+
+환경 변수로 조정할 수 있습니다.
 
 ```powershell
-$env:CODEX_TOKEN_VAULT = "1"                 # 0/false/no/off disables
-$env:CODEX_TOKEN_VAULT_THRESHOLD = "12000"   # bytes before compaction
-$env:CODEX_TOKEN_VAULT_MAX_CHARS = "4000"    # compact summary budget
+$env:CODEX_TOKEN_VAULT = "1"                 # 0/false/no/off 이면 비활성화
+$env:CODEX_TOKEN_VAULT_THRESHOLD = "12000"   # 이 byte 이상이면 압축
+$env:CODEX_TOKEN_VAULT_MAX_CHARS = "4000"    # 요약 최대 길이
 $env:CODEX_TOKEN_VAULT_DIR = "$HOME\.omx\token-vault-codex"
 ```
 
-### Uninstall
+## 제거
 
-Remove the Token Vault `PostToolUse` entry and status `UserPromptSubmit` entry from `%USERPROFILE%\.codex\hooks.json`, then delete:
+`%USERPROFILE%\.codex\hooks.json`에서 Token Vault `PostToolUse` 항목을 제거한 뒤 아래 파일을 삭제합니다.
 
 ```powershell
-Remove-Item -Recurse -Force "$HOME\.codex\hooks\codex-token-vault-windows-shim.ps1"
-Remove-Item -Recurse -Force "$HOME\.codex\hooks\codex-status-windows-shim.ps1"
+Remove-Item -Force "$HOME\.codex\hooks\codex-token-vault-windows-shim.ps1"
 Remove-Item -Recurse -Force "$HOME\.omx\token-vault-codex"
 ```
 
-The installer creates timestamped backups of `hooks.json` and `config.toml` before modifying them.
-
-## Imported Integrations
-
-### OpenClaw TokenJuice Vault
-
-Path:
+설치 전 백업 파일은 다음 형식으로 생성됩니다.
 
 ```text
-integrations/imported/openclaw-tokenjuice-vault-reinstall
+%USERPROFILE%\.codex\hooks.json.bak-token-vault-*
+%USERPROFILE%\.codex\config.toml.bak-token-vault-trust-*
 ```
 
-Install:
+## 성능 평가
 
-```bash
-cd integrations/imported/openclaw-tokenjuice-vault-reinstall
-./install.sh
-```
-
-Optional:
-
-```bash
-OPENCLAW_ROOT=/path/to/openclaw ./install.sh
-```
-
-Effect: large OpenClaw shell/tool results are stored under `~/.openclaw/token-vault/artifacts/` and compact summaries enter context.
-
-### Hermes Token Vault
-
-Path:
-
-```text
-integrations/imported/hermes-token-vault-reinstall
-```
-
-Install:
-
-```bash
-cd integrations/imported/hermes-token-vault-reinstall
-./install.sh
-```
-
-Effect: large Hermes tool results are stored under `~/.hermes/token-vault/artifacts/` and compact summaries enter context.
-
-### Original OMX Token Vault Package
-
-Path:
-
-```text
-integrations/imported/omx-token-vault-reinstall
-```
-
-Install:
-
-```bash
-cd integrations/imported/omx-token-vault-reinstall
-./install.sh
-```
-
-Effect: large Codex/OMX tool results are stored under `~/.omx/token-vault/artifacts/` and compact summaries enter context.
-
-Note: this imported package was built around Unix-style paths such as `/usr/bin/node`. For Windows Codex Desktop, prefer the main implementation in this repository.
-
-## Performance Evaluation
-
-Measured locally on Windows Codex Desktop workspace with:
+로컬 Windows Codex Desktop 작업공간에서 측정했습니다.
 
 ```powershell
 npm run benchmark
 ```
 
-| Scenario | Without Token Vault | With Token Vault | Reduction | Hook Time |
+| 시나리오 | 적용 전 | 적용 후 | 절감률 | Hook 시간 |
 | --- | ---: | ---: | ---: | ---: |
-| Large test log with failures | 241,022 bytes | 4,200 bytes | 98.3% | 20.63 ms |
-| Repo-wide search output | 167,219 bytes | 5,942 bytes | 96.4% | 9.18 ms |
-| Small command output | 17 bytes | 17 bytes | 0% | 0.04 ms |
+| 실패가 포함된 큰 테스트 로그 | 241,022 bytes | 4,200 bytes | 98.3% | 36.00 ms |
+| repo-wide 검색 출력 | 167,219 bytes | 5,942 bytes | 96.4% | 16.34 ms |
+| 작은 명령 출력 | 17 bytes | 17 bytes | 0% | 0.04 ms |
 
-The compactor leaves small outputs untouched and only rewrites results when the compact wrapper is meaningfully smaller than the original.
+해석:
 
-## Verification
+- 큰 출력은 96-98% 수준으로 줄었습니다.
+- 작은 출력은 압축하지 않아 정보 손실이 없습니다.
+- 원문은 로컬 vault에 남기 때문에 필요하면 다시 읽을 수 있습니다.
+
+## 검증
 
 ```powershell
 npm test
@@ -195,33 +153,106 @@ node --check .\src\codex-token-vault-hook.mjs
 node --check .\src\token-vault-core.mjs
 ```
 
-Current validation status:
+현재 검증 상태:
 
-- `npm test`: 11/11 passing
-- `npm run benchmark`: 96.4-98.3% reduction on large synthetic outputs
-- Installed Windows vault shim: emits compact Codex `PostToolUse` replacement output without warnings
-- Installed Windows status shim: emits `UserPromptSubmit` status context for `/상태`, `/status`, and the Windows mojibake fallback `/??`
-- Installed status CLI: prints current local 5-hour and weekly quota lines directly
-- Installed status skill: exposes a `token-status` skill for Desktop skill routing
+- `npm test`: 11개 통과
+- `npm run benchmark`: 큰 synthetic output에서 96.4-98.3% 절감
+- Windows vault shim: Codex `PostToolUse` compact output 정상 생성
+- small output passthrough 확인
+- vault artifact 재압축 방지 확인
+- secret-shaped field redaction 확인
 
-## Security Notes
+## 포함된 외부/이식 패키지
 
-The compact summary redacts common secret-shaped fields, but the exact original tool result is stored locally for retrieval. Avoid printing secrets in terminal commands. If sensitive output may have been captured, remove the relevant artifact from the vault directory.
+### OpenClaw TokenJuice Vault
 
-## Repository Layout
+경로:
 
 ```text
-src/                         Windows/Codex Token Vault implementation
-scripts/                     Installer for Codex Desktop on Windows
-test/                        Node test runner coverage
-tools/                       Benchmark script
-integrations/imported/       Imported OpenClaw, Hermes, and OMX reinstall packages
-archives/                    Original tar.gz bundles
+integrations/imported/openclaw-tokenjuice-vault-reinstall
 ```
 
-## Related Projects And Ideas
+설치:
 
-- [Caveman](https://github.com/juliusbrussee/caveman) - output style compression
-- [RTK](https://github.com/rtk-ai/rtk) - terminal output filtering
-- [Context Mode](https://github.com/mksglu/context-mode) - out-of-context storage and session continuity
-- [Token Optimizer MCP](https://github.com/ooples/token-optimizer-mcp) - MCP caching and compression patterns
+```bash
+cd integrations/imported/openclaw-tokenjuice-vault-reinstall
+./install.sh
+```
+
+효과:
+
+- 큰 OpenClaw shell/tool 결과를 `~/.openclaw/token-vault/artifacts/`에 저장
+- 컨텍스트에는 compact summary 전달
+
+### Hermes Token Vault
+
+경로:
+
+```text
+integrations/imported/hermes-token-vault-reinstall
+```
+
+설치:
+
+```bash
+cd integrations/imported/hermes-token-vault-reinstall
+./install.sh
+```
+
+효과:
+
+- 큰 Hermes tool 결과를 `~/.hermes/token-vault/artifacts/`에 저장
+- 컨텍스트에는 compact summary 전달
+
+### 기존 OMX Token Vault 패키지
+
+경로:
+
+```text
+integrations/imported/omx-token-vault-reinstall
+```
+
+설치:
+
+```bash
+cd integrations/imported/omx-token-vault-reinstall
+./install.sh
+```
+
+효과:
+
+- 큰 Codex/OMX tool 결과를 `~/.omx/token-vault/artifacts/`에 저장
+- 컨텍스트에는 compact summary 전달
+
+주의:
+
+- 이 imported 패키지는 Unix 경로(`/usr/bin/node` 등)를 기준으로 만들어졌습니다.
+- Windows Codex Desktop에서는 저장소 루트의 `scripts/install-token-vault.ps1`을 쓰는 것을 권장합니다.
+
+## 보안 주의사항
+
+compact summary에서는 흔한 secret 형태를 redaction하지만, 원본 출력 전체는 로컬 vault에 저장됩니다.
+
+민감한 값이 터미널에 출력된 경우:
+
+1. 해당 artifact를 `%USERPROFILE%\.omx\token-vault-codex\artifacts`에서 삭제하세요.
+2. 필요하면 vault 디렉터리 전체를 삭제하세요.
+3. 이미 노출된 API key나 token은 폐기/재발급하세요.
+
+## 저장소 구조
+
+```text
+src/                         Windows/Codex Token Vault 구현
+scripts/                     Windows Codex Desktop 설치 스크립트
+test/                        Node test runner 테스트
+tools/                       benchmark 스크립트
+integrations/imported/       OpenClaw, Hermes, OMX 이식 패키지
+archives/                    원본 tar.gz 번들
+```
+
+## 참고한 아이디어
+
+- [Caveman](https://github.com/juliusbrussee/caveman): 출력 스타일 압축
+- [RTK](https://github.com/rtk-ai/rtk): 터미널 출력 필터링
+- [Context Mode](https://github.com/mksglu/context-mode): 컨텍스트 밖 저장소 활용
+- [Token Optimizer MCP](https://github.com/ooples/token-optimizer-mcp): MCP 캐싱/압축 패턴
