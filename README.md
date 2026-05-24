@@ -53,19 +53,19 @@ It is designed for Windows Codex Desktop and keeps existing OMX hooks intact. In
 
 Codex's own Desktop `/status` command is a built-in app slash command that shows thread ID, context usage, and rate limits. Built-in slash commands are handled by Codex before ordinary `UserPromptSubmit` hooks, so Token Vault does not intercept or replace the native `/status` command.
 
-For Korean Desktop sessions, the installer adds two fallback surfaces for `/상태`:
+For Korean Desktop sessions, the installer adds two fallback surfaces for status prompts:
 
 1. `codex-status-windows-shim.ps1` as the first `UserPromptSubmit` hook.
-2. A user skill installed at `%USERPROFILE%\.codex\skills\codex-token-status\SKILL.md` with `name: "상태"`.
+2. A user skill installed at `%USERPROFILE%\.codex\skills\codex-token-status\SKILL.md` with `name: "token-status"`.
 
-The fallback hook reacts only to:
+The fallback hook reacts only if the prompt reaches `UserPromptSubmit` as:
 
 ```text
 /상태
 /status
 ```
 
-Both fallback paths read the newest local `token_count` event from `%USERPROFILE%\.codex\sessions\**\*.jsonl`. Token Vault remains isolated on `PostToolUse`, so quota display and output compaction do not compete with each other.
+Codex app built-in slash commands are handled before hooks, and custom skills are mentioned with `$`/`@` rather than `/`. If the Desktop slash parser does not pass `/상태` through, use `token-status`, `$token-status`, or a plain Korean prompt such as `상태` instead. Both fallback paths read the newest local `token_count` event from `%USERPROFILE%\.codex\sessions\**\*.jsonl`. Token Vault remains isolated on `PostToolUse`, so quota display and output compaction do not compete with each other.
 
 Direct check:
 
@@ -202,7 +202,7 @@ Current validation status:
 - Installed Windows vault shim: emits compact Codex `PostToolUse` replacement output without warnings
 - Installed Windows status shim: emits `UserPromptSubmit` status context for `/상태`, `/status`, and the Windows mojibake fallback `/??`
 - Installed status CLI: prints current local 5-hour and weekly quota lines directly
-- Installed status skill: exposes a `상태` skill for Desktop slash/skill routing
+- Installed status skill: exposes a `token-status` skill for Desktop skill routing
 
 ## Security Notes
 

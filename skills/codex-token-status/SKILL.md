@@ -1,6 +1,6 @@
 ---
-name: "상태"
-description: "Show the current Codex token status from local session telemetry, including 5-hour and weekly limits. Use when the user types /상태 or asks for Codex token quota status in Korean."
+name: "token-status"
+description: "Show the current Codex token status from local session telemetry, including 5-hour and weekly limits. Use when the user types token-status, 상태, /상태, or asks for Codex token quota status in Korean."
 ---
 
 # Codex Token Status
