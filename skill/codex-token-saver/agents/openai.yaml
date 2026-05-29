@@ -1,0 +1,3 @@
+display_name: Codex Token Saver
+short_description: Compact Codex context with SQLite-backed raw evidence.
+default_prompt: Run Codex Token Saver on this workspace and recommend the safest token-saving path.
