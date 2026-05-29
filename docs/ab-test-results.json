@@ -3,7 +3,7 @@
   "overall_optimized_tokens": 111,
   "overall_saving_ratio": 0.9447,
   "anchor_recall": 1.0,
-  "elapsed_ms": 7.308,
+  "elapsed_ms": 7.541,
   "cases": [
     {
       "name": "git_status_verbose",

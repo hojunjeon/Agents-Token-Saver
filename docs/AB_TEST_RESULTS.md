@@ -6,7 +6,7 @@ Baseline sends raw terminal/file context. Optimized sends compact facts plus SQL
 - Overall optimized tokens: 111
 - Overall saving: 94.5%
 - Anchor recall: 100%
-- Runtime: 7.308 ms
+- Runtime: 7.541 ms
 
 | Case | Type | Baseline | Optimized | Saving | Recall |
 |---|---:|---:|---:|---:|---:|
